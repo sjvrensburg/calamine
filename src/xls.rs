@@ -16,7 +16,9 @@ use crate::formats::{
 };
 #[cfg(feature = "picture")]
 use crate::utils::read_usize;
-use crate::utils::{push_column, read_f64, read_i16, read_i32, read_u16, read_u32};
+use crate::utils::{
+    push_column, push_sheet_name, read_f64, read_i16, read_i32, read_u16, read_u32,
+};
 use crate::vba::VbaProject;
 use crate::{
     Cell, CellErrorType, Data, Dimensions, HeaderRow, Metadata, Range, Reader, Sheet, SheetType,
@@ -1711,10 +1713,13 @@ fn parse_formula(
                 let colu = read_u16(&rgce[4..]);
                 let sh = xtis
                     .get(ixti as usize)
-                    .and_then(|xti| sheets.get(xti.itab_first as usize))
-                    .map_or("#REF", |sh| sh);
+                    .and_then(|xti| sheets.get(xti.itab_first as usize));
                 stack.push(formula.len());
-                formula.push_str(sh);
+                match sh {
+                    Some(sh) => push_sheet_name(sh, &mut formula),
+                    // Not a sheet name but an error marker, so it is not quoted.
+                    None => formula.push_str("#REF"),
+                }
                 formula.push('!');
                 let col = colu << 2; // first 14 bits only
                 if colu & 2 != 0 {
@@ -1731,7 +1736,11 @@ fn parse_formula(
                 // PtgArea3d
                 let ixti = read_u16(&rgce[0..2]);
                 stack.push(formula.len());
-                formula.push_str(sheets.get(ixti as usize).map_or("#REF", |s| &**s));
+                match sheets.get(ixti as usize) {
+                    Some(sh) => push_sheet_name(sh, &mut formula),
+                    // Not a sheet name but an error marker, so it is not quoted.
+                    None => formula.push_str("#REF"),
+                }
                 formula.push('!');
                 // TODO: check with relative columns
                 formula.push('$');
@@ -1745,7 +1754,11 @@ fn parse_formula(
                 // PtfRefErr3d
                 let ixti = read_u16(&rgce[0..2]);
                 stack.push(formula.len());
-                formula.push_str(sheets.get(ixti as usize).map_or("#REF", |s| &**s));
+                match sheets.get(ixti as usize) {
+                    Some(sh) => push_sheet_name(sh, &mut formula),
+                    // Not a sheet name but an error marker, so it is not quoted.
+                    None => formula.push_str("#REF"),
+                }
                 formula.push('!');
                 formula.push_str("#REF!");
                 rgce = &rgce[6..];
@@ -1754,7 +1767,11 @@ fn parse_formula(
                 // PtgAreaErr3d
                 let ixti = read_u16(&rgce[0..2]);
                 stack.push(formula.len());
-                formula.push_str(sheets.get(ixti as usize).map_or("#REF", |s| &**s));
+                match sheets.get(ixti as usize) {
+                    Some(sh) => push_sheet_name(sh, &mut formula),
+                    // Not a sheet name but an error marker, so it is not quoted.
+                    None => formula.push_str("#REF"),
+                }
                 formula.push('!');
                 formula.push_str("#REF!");
                 rgce = &rgce[10..];
