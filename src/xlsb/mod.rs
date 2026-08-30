@@ -742,15 +742,20 @@ fn wide_str<'a>(buf: &'a [u8], str_len: &mut usize) -> Result<Cow<'a, str>, Xlsb
 /// Split an `RgceLoc` column field into its parts.
 ///
 /// The low 14 bits are the column — XLSB sheets have 16,384 of them — and the
-/// top two are relativity flags: `0x8000` for the column, `0x4000` for the row.
+/// top two are relativity flags. MS-XLSB orders them column-first: `0x4000`
+/// marks the column relative and `0x8000` the row, which is the reverse of the
+/// BIFF8 layout the `.xls` reader uses. Same two bits, different format, and
+/// nothing in either reader's output makes the difference visible until a
+/// number comes out wrong.
+///
 /// Reading the field whole is not a display bug but a wrong reference: a
 /// relative column 2 is stored as `0x4002`, which taken as a column index is
 /// 16,386, two past Excel's last and printed as `XFF`.
 fn read_loc_col(field: u16) -> (u32, bool, bool) {
     (
         u32::from(field & 0x3FFF),
-        field & 0x8000 == 0x8000,
         field & 0x4000 == 0x4000,
+        field & 0x8000 == 0x8000,
     )
 }
 
@@ -1193,10 +1198,10 @@ mod formula_tests {
     /// Build an `RgceLoc` column field: 14 bits of column, two of relativity.
     fn loc_col(col: u16, row_rel: bool, col_rel: bool) -> u16 {
         let mut field = col & 0x3FFF;
-        if row_rel {
+        if col_rel {
             field |= 0x4000;
         }
-        if col_rel {
+        if row_rel {
             field |= 0x8000;
         }
         field
@@ -1228,10 +1233,10 @@ mod formula_tests {
         let mut v = vec![ptg];
         v.extend_from_slice(&(row as u32).to_le_bytes());
         let mut c = (col as u16) & 0x3FFF;
-        if row_rel {
+        if col_rel {
             c |= 0x4000;
         }
-        if col_rel {
+        if row_rel {
             c |= 0x8000;
         }
         v.extend_from_slice(&c.to_le_bytes());
@@ -1281,7 +1286,8 @@ mod formula_tests {
         // The whole defect in one assertion: column 2 marked relative is
         // stored as 0x4002, and taken whole that is 16,386 — two past Excel's
         // last column, printed as `XFF`.
-        assert_eq!(read_loc_col(0x4002), (2, false, true));
+        assert_eq!(read_loc_col(0x4002), (2, true, false));
+        assert_eq!(read_loc_col(0x8002), (2, false, true));
         assert_eq!(read_loc_col(0xC003), (3, true, true));
         assert_eq!(read_loc_col(0x3FFF), (16383, false, false));
     }
