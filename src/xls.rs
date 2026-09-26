@@ -1533,6 +1533,9 @@ fn read_ref_n(
         (read_u16(rgce) as u32, col & 0x00FF, row_rel, col_rel, 16, 8)
     };
 
+    // An offset that runs off the sheet wraps round it, as RgceLocRel
+    // specifies: modulo 0x10000 rows and 0x100 columns in BIFF8, and 0x4000
+    // rows before it. The field widths are exactly those moduli.
     let row = if row_rel {
         (anchor.0 as i32).wrapping_add(sign_extend(row_field, row_bits)) as u32
     } else {
@@ -1544,7 +1547,13 @@ fn read_ref_n(
         col_field
     };
 
-    Ok((row, col, row_rel, col_rel, need))
+    Ok((
+        row & ((1 << row_bits) - 1),
+        col & ((1 << col_bits) - 1),
+        row_rel,
+        col_rel,
+        need,
+    ))
 }
 
 /// Decode a `PtgAreaN` operand as its two corners.
@@ -2366,6 +2375,25 @@ mod formula_tests {
         // PtgRefN for B$1 (row absolute 0, column one left), evaluated at C6.
         let t = [0x4C, 0x00, 0x00, 0xFF, 0x40];
         assert_eq!(parse(&t, (5, 2), Biff::Biff8), "B$1");
+    }
+
+    #[test]
+    fn ptg_ref_n_offsets_wrap_round_the_sheet() {
+        // One row up and one column left of A1 is the sheet's last cell, not
+        // a row index of u32::MAX, which overflowed when printed.
+        let t = ref_n_biff8(0x4C, -1, -1, true, true);
+        assert_eq!(parse(&t, (0, 0), Biff::Biff8), "IV65536");
+
+        // And past the far edge, back to the first.
+        let t = ref_n_biff8(0x4C, 1, 1, true, true);
+        assert_eq!(parse(&t, (65535, 255), Biff::Biff8), "A1");
+
+        // BIFF2-5 sheets have 16,384 rows.
+        let rw: u16 = ((-1i16 as u16) & 0x3FFF) | 0x8000 | 0x4000;
+        let mut t = vec![0x4Cu8];
+        t.extend_from_slice(&rw.to_le_bytes());
+        t.push(0);
+        assert_eq!(parse(&t, (0, 2), Biff::Biff5), "C16384");
     }
 
     #[test]
