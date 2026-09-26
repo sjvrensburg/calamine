@@ -743,8 +743,7 @@ fn wide_str<'a>(buf: &'a [u8], str_len: &mut usize) -> Result<Cow<'a, str>, Xlsb
 ///
 /// The low 14 bits are the column — XLSB sheets have 16,384 of them — and the
 /// top two are relativity flags. MS-XLSB orders them column-first: `0x4000`
-/// marks the column relative and `0x8000` the row, which is the reverse of the
-/// BIFF8 layout the `.xls` reader uses. Same two bits, different format.
+/// marks the column relative and `0x8000` the row, as BIFF8's `ColRelU` does.
 ///
 /// Reading the field whole is not a display bug but a wrong reference: a
 /// relative column 2 is stored as `0x4002`, which taken as a column index is
