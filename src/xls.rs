@@ -1686,6 +1686,20 @@ fn parse_defined_names(rgce: &[u8], biff: Biff) -> Result<(Option<usize>, String
     };
     Ok(res)
 }
+/// Write the sheet a 3-D token's `ixti` names.
+///
+/// `ixti` indexes the XTI table, not the sheets. When it names nothing, write
+/// `#REF`, unquoted because it is an error marker and not a sheet name.
+fn push_xti_sheet(xtis: &[Xti], sheets: &[String], ixti: u16, formula: &mut String) {
+    match xtis
+        .get(ixti as usize)
+        .and_then(|xti| sheets.get(xti.itab_first as usize))
+    {
+        Some(sh) => push_sheet_name(sh, formula),
+        None => formula.push_str("#REF"),
+    }
+}
+
 /// Formula parsing
 ///
 /// `CellParsedFormula` [MS-XLS 2.5.198.3]
@@ -1713,71 +1727,41 @@ fn parse_formula(
         rgce = &rgce[1..];
         match ptg {
             0x3a | 0x5a | 0x7a => {
-                // PtgRef3d
-                let ixti = read_u16(&rgce[0..2]);
-                let rowu = read_u16(&rgce[2..]);
-                let colu = read_u16(&rgce[4..]);
-                let sh = xtis
-                    .get(ixti as usize)
-                    .and_then(|xti| sheets.get(xti.itab_first as usize));
+                // PtgRef3d: ixti(2) + rw(2) + ColRelU(2)
+                let row = read_u16(&rgce[2..4]) as u32;
+                let (col, col_rel, row_rel) = read_col_rel_u(read_u16(&rgce[4..6]));
                 stack.push(formula.len());
-                match sh {
-                    Some(sh) => push_sheet_name(sh, &mut formula),
-                    // Not a sheet name but an error marker, so it is not quoted.
-                    None => formula.push_str("#REF"),
-                }
+                push_xti_sheet(xtis, sheets, read_u16(&rgce[0..2]), &mut formula);
                 formula.push('!');
-                let col = colu << 2; // first 14 bits only
-                if colu & 2 != 0 {
-                    formula.push('$');
-                }
-                push_column(col as u32, &mut formula);
-                if colu & 1 != 0 {
-                    formula.push('$');
-                }
-                write!(&mut formula, "{}", rowu + 1).unwrap();
+                push_a1(&mut formula, row, col, row_rel, col_rel);
                 rgce = &rgce[6..];
             }
             0x3b | 0x5b | 0x7b => {
-                // PtgArea3d
-                let ixti = read_u16(&rgce[0..2]);
+                // PtgArea3d: ixti(2) + rwFirst(2) + rwLast(2) + colFirst(2) + colLast(2)
+                let row_first = read_u16(&rgce[2..4]) as u32;
+                let row_last = read_u16(&rgce[4..6]) as u32;
+                let (col_first, c1_rel, r1_rel) = read_col_rel_u(read_u16(&rgce[6..8]));
+                let (col_last, c2_rel, r2_rel) = read_col_rel_u(read_u16(&rgce[8..10]));
                 stack.push(formula.len());
-                match sheets.get(ixti as usize) {
-                    Some(sh) => push_sheet_name(sh, &mut formula),
-                    // Not a sheet name but an error marker, so it is not quoted.
-                    None => formula.push_str("#REF"),
-                }
+                push_xti_sheet(xtis, sheets, read_u16(&rgce[0..2]), &mut formula);
                 formula.push('!');
-                // TODO: check with relative columns
-                formula.push('$');
-                push_column(read_u16(&rgce[6..8]) as u32, &mut formula);
-                write!(&mut formula, "${}:$", read_u16(&rgce[2..4]) as u32 + 1).unwrap();
-                push_column(read_u16(&rgce[8..10]) as u32, &mut formula);
-                write!(&mut formula, "${}", read_u16(&rgce[4..6]) as u32 + 1).unwrap();
+                push_a1(&mut formula, row_first, col_first, r1_rel, c1_rel);
+                formula.push(':');
+                push_a1(&mut formula, row_last, col_last, r2_rel, c2_rel);
                 rgce = &rgce[10..];
             }
             0x3c | 0x5c | 0x7c => {
                 // PtfRefErr3d
-                let ixti = read_u16(&rgce[0..2]);
                 stack.push(formula.len());
-                match sheets.get(ixti as usize) {
-                    Some(sh) => push_sheet_name(sh, &mut formula),
-                    // Not a sheet name but an error marker, so it is not quoted.
-                    None => formula.push_str("#REF"),
-                }
+                push_xti_sheet(xtis, sheets, read_u16(&rgce[0..2]), &mut formula);
                 formula.push('!');
                 formula.push_str("#REF!");
                 rgce = &rgce[6..];
             }
             0x3d | 0x5d | 0x7d => {
                 // PtgAreaErr3d
-                let ixti = read_u16(&rgce[0..2]);
                 stack.push(formula.len());
-                match sheets.get(ixti as usize) {
-                    Some(sh) => push_sheet_name(sh, &mut formula),
-                    // Not a sheet name but an error marker, so it is not quoted.
-                    None => formula.push_str("#REF"),
-                }
+                push_xti_sheet(xtis, sheets, read_u16(&rgce[0..2]), &mut formula);
                 formula.push('!');
                 formula.push_str("#REF!");
                 rgce = &rgce[10..];
