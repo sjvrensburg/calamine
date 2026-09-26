@@ -1705,6 +1705,12 @@ fn parse_formula(
     let is_pre_biff8 = matches!(biff, Biff::Biff2 | Biff::Biff3 | Biff::Biff4 | Biff::Biff5);
     let mut stack = Vec::new();
     let mut formula = String::with_capacity(rgce.len());
+    // A 3-D token's ixti indexes the XTI table, not the sheets.
+    let sheet_of = |ixti: u16| {
+        xtis.get(ixti as usize)
+            .and_then(|xti| sheets.get(xti.itab_first as usize))
+            .map_or("#REF", |sh| sh.as_str())
+    };
     let cce = read_u16(rgce) as usize;
     rgce = &rgce[2..2 + cce];
     while !rgce.is_empty() {
@@ -1712,56 +1718,41 @@ fn parse_formula(
         rgce = &rgce[1..];
         match ptg {
             0x3a | 0x5a | 0x7a => {
-                // PtgRef3d
-                let ixti = read_u16(&rgce[0..2]);
-                let rowu = read_u16(&rgce[2..]);
-                let colu = read_u16(&rgce[4..]);
-                let sh = xtis
-                    .get(ixti as usize)
-                    .and_then(|xti| sheets.get(xti.itab_first as usize))
-                    .map_or("#REF", |sh| sh);
+                // PtgRef3d: ixti(2) + rw(2) + ColRelU(2)
+                let row = read_u16(&rgce[2..4]) as u32;
+                let (col, col_rel, row_rel) = read_col_rel_u(read_u16(&rgce[4..6]));
                 stack.push(formula.len());
-                formula.push_str(sh);
+                formula.push_str(sheet_of(read_u16(&rgce[0..2])));
                 formula.push('!');
-                let col = colu << 2; // first 14 bits only
-                if colu & 2 != 0 {
-                    formula.push('$');
-                }
-                push_column(col as u32, &mut formula);
-                if colu & 1 != 0 {
-                    formula.push('$');
-                }
-                write!(&mut formula, "{}", rowu + 1).unwrap();
+                push_a1(&mut formula, row, col, row_rel, col_rel);
                 rgce = &rgce[6..];
             }
             0x3b | 0x5b | 0x7b => {
-                // PtgArea3d
-                let ixti = read_u16(&rgce[0..2]);
+                // PtgArea3d: ixti(2) + rwFirst(2) + rwLast(2) + colFirst(2) + colLast(2)
+                let row_first = read_u16(&rgce[2..4]) as u32;
+                let row_last = read_u16(&rgce[4..6]) as u32;
+                let (col_first, c1_rel, r1_rel) = read_col_rel_u(read_u16(&rgce[6..8]));
+                let (col_last, c2_rel, r2_rel) = read_col_rel_u(read_u16(&rgce[8..10]));
                 stack.push(formula.len());
-                formula.push_str(sheets.get(ixti as usize).map_or("#REF", |s| &**s));
+                formula.push_str(sheet_of(read_u16(&rgce[0..2])));
                 formula.push('!');
-                // TODO: check with relative columns
-                formula.push('$');
-                push_column(read_u16(&rgce[6..8]) as u32, &mut formula);
-                write!(&mut formula, "${}:$", read_u16(&rgce[2..4]) as u32 + 1).unwrap();
-                push_column(read_u16(&rgce[8..10]) as u32, &mut formula);
-                write!(&mut formula, "${}", read_u16(&rgce[4..6]) as u32 + 1).unwrap();
+                push_a1(&mut formula, row_first, col_first, r1_rel, c1_rel);
+                formula.push(':');
+                push_a1(&mut formula, row_last, col_last, r2_rel, c2_rel);
                 rgce = &rgce[10..];
             }
             0x3c | 0x5c | 0x7c => {
                 // PtfRefErr3d
-                let ixti = read_u16(&rgce[0..2]);
                 stack.push(formula.len());
-                formula.push_str(sheets.get(ixti as usize).map_or("#REF", |s| &**s));
+                formula.push_str(sheet_of(read_u16(&rgce[0..2])));
                 formula.push('!');
                 formula.push_str("#REF!");
                 rgce = &rgce[6..];
             }
             0x3d | 0x5d | 0x7d => {
                 // PtgAreaErr3d
-                let ixti = read_u16(&rgce[0..2]);
                 stack.push(formula.len());
-                formula.push_str(sheets.get(ixti as usize).map_or("#REF", |s| &**s));
+                formula.push_str(sheet_of(read_u16(&rgce[0..2])));
                 formula.push('!');
                 formula.push_str("#REF!");
                 rgce = &rgce[10..];
