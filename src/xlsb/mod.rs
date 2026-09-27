@@ -813,8 +813,6 @@ fn xti_sheet(book: i32, tab: i32, this_book: Option<usize>, sheets: &[(String, S
     }
 }
 
-/// Formula parsing
-///
 /// Decode a 6-byte `Loc` reference whose relative components are offsets.
 ///
 /// Returns `(row, col, row_is_relative, col_is_relative)` with absolute
@@ -904,6 +902,8 @@ pub(crate) fn shared_formula_anchor_row(rgce: &[u8]) -> Option<u32> {
     (rgce.len() >= 5 && rgce[0] == 0x01).then(|| read_u32(&rgce[1..5]))
 }
 
+/// Formula parsing
+///
 /// [MS-XLSB 2.2.2]
 /// [MS-XLSB 2.5.97]
 ///
