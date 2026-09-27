@@ -1695,6 +1695,7 @@ fn parse_defined_names(rgce: &[u8], biff: Biff) -> Result<(Option<usize>, String
     };
     Ok(res)
 }
+
 /// Write the sheet a 3-D token's `ixti` names.
 ///
 /// `ixti` indexes the XTI table, not the sheets. When it names nothing, write
